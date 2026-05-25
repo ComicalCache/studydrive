@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "StudyDrive PDF Downloader",
+  "version": "1.0",
+  "description": "Download PDF documents from StudyDrive",
+  "permissions": ["activeTab", "downloads"],
+  "host_permissions": ["https://www.studydrive.net/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.studydrive.net/*/doc/*"],
+      "js": ["inject.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://www.studydrive.net/*/doc/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "world": "ISOLATED"
+    }
+  ],
+  "icons": {
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}
