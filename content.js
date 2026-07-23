@@ -13,9 +13,17 @@
   }
 
   let fileName = 'document.pdf';
-  const nameMatch = /"filename":"([^"]+)"/.exec(scriptContent);
+  const nameMatch = /"filename":"((?:[^"\\]|\\.)*)"/.exec(scriptContent);
   if (nameMatch) {
-    fileName = nameMatch[1].replace(/\\\//g, '/');
+    // The match is still JSON-escaped source text (e.g. "Buchführung" contains
+    // a literal backslash, not "ü") — decode it as a JSON string so accented/special
+    // characters come through correctly instead of leaving stray backslashes that
+    // chrome.downloads.download() rejects with "Invalid filename".
+    try {
+      fileName = JSON.parse('"' + nameMatch[1] + '"');
+    } catch (e) {
+      fileName = nameMatch[1].replace(/\\\//g, '/');
+    }
     if (!fileName.endsWith('.pdf')) {
       fileName = fileName.replace(/\.[^.]+$/, '') + '.pdf';
     }
@@ -45,12 +53,35 @@
   btn.addEventListener('mouseenter', () => { btn.style.transform = 'scale(1.05)'; });
   btn.addEventListener('mouseleave', () => { btn.style.transform = 'scale(1)'; });
 
+  // chrome.runtime.sendMessage caps a single message at 64MiB, which base64-encoded
+  // PDFs over ~48MB exceed — so large exports are split into chunks below that cap
+  // and reassembled by background.js before it triggers the actual download.
+  const CHUNK_SIZE = 20 * 1024 * 1024;
+
+  async function sendInChunks(base64, filename) {
+    const downloadId = `sd-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const totalChunks = Math.max(1, Math.ceil(base64.length / CHUNK_SIZE));
+    let result;
+    for (let i = 0; i < totalChunks; i++) {
+      const chunk = base64.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+      result = await chrome.runtime.sendMessage({
+        action: 'download-chunk',
+        downloadId,
+        chunkIndex: i,
+        totalChunks,
+        chunk,
+        filename
+      });
+    }
+    return result;
+  }
+
   btn.addEventListener('click', () => {
     btn.textContent = '⏳ Exporting...';
     btn.disabled = true;
     console.log('[SD] Requesting PDF export from PSPDFKit');
 
-    const handler = (e) => {
+    const handler = async (e) => {
       window.removeEventListener('sd-export-result', handler);
       const detail = JSON.parse(e.detail);
       console.log('[SD] Export result:', detail.error || (detail.size + ' bytes'));
@@ -61,18 +92,15 @@
         return;
       }
 
-      chrome.runtime.sendMessage(
-        { action: 'download', base64: detail.base64, filename: fileName },
-        (resp) => {
-          console.log('[SD] Background response:', resp);
-          if (resp && resp.success) {
-            btn.textContent = '✓ Downloaded';
-          } else {
-            btn.textContent = '✗ Failed';
-          }
-          setTimeout(() => { btn.textContent = '⬇ Download PDF'; btn.disabled = false; }, 2500);
-        }
-      );
+      try {
+        const resp = await sendInChunks(detail.base64, fileName);
+        console.log('[SD] Background response:', JSON.stringify(resp));
+        btn.textContent = resp && resp.success ? '✓ Downloaded' : ('✗ ' + (resp?.error || 'Failed'));
+      } catch (err) {
+        console.error('[SD] Download error:', err);
+        btn.textContent = '✗ Failed';
+      }
+      setTimeout(() => { btn.textContent = '⬇ Download PDF'; btn.disabled = false; }, 2500);
     };
     window.addEventListener('sd-export-result', handler);
     window.dispatchEvent(new CustomEvent('sd-export-pdf'));

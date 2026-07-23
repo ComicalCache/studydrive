@@ -3,6 +3,16 @@
 (function () {
   let capturedPdfBuffer = null;
 
+  // application/octet-stream and file-preview URLs are also used by unrelated
+  // small polling/realtime responses on this page, which would otherwise
+  // silently overwrite a correctly captured PDF — so verify the %PDF- magic
+  // bytes before accepting a buffer as the document.
+  function looksLikePdf(buffer) {
+    if (!buffer || buffer.byteLength < 5) return false;
+    const head = new Uint8Array(buffer, 0, 5);
+    return head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46 && head[4] === 0x2d;
+  }
+
   // Intercept fetch
   const origFetch = window.fetch;
   window.fetch = async function (...args) {
@@ -13,7 +23,7 @@
       if (ct.includes('application/pdf') || ct.includes('application/octet-stream') || url.includes('file-preview')) {
         const clone = response.clone();
         const buffer = await clone.arrayBuffer();
-        if (buffer.byteLength > 0) {
+        if (looksLikePdf(buffer)) {
           console.log('[SD inject] Captured PDF via fetch:', buffer.byteLength, 'bytes, url:', url.substring(0, 80));
           capturedPdfBuffer = buffer;
         }
@@ -42,14 +52,14 @@
           } else if (this.response instanceof Blob) {
             // Handle blob asynchronously
             this.response.arrayBuffer().then(buf => {
-              if (buf.byteLength > 0) {
+              if (looksLikePdf(buf)) {
                 console.log('[SD inject] Captured PDF via XHR blob:', buf.byteLength, 'bytes');
                 capturedPdfBuffer = buf;
               }
             });
             return;
           }
-          if (buffer && buffer.byteLength > 0) {
+          if (looksLikePdf(buffer)) {
             console.log('[SD inject] Captured PDF via XHR:', buffer.byteLength, 'bytes');
             capturedPdfBuffer = buffer;
           }
