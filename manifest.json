@@ -6,7 +6,8 @@
   "permissions": ["activeTab", "downloads"],
   "host_permissions": ["https://www.studydrive.net/*"],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "scripts": ["background.js"]
   },
   "content_scripts": [
     {
@@ -25,5 +26,11 @@
   "icons": {
     "48": "icon48.png",
     "128": "icon128.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "download@studydrive.net",
+      "strict_min_version": "109.0"
+    }
   }
 }
